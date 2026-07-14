@@ -1,0 +1,17 @@
+.{
+    .name = .zfunctions,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0xa7444485afc81fbc,
+    .description = "ECMAScript functions/arrow-functions parser (ECMA-262 section 15, narrowed) in Zig",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src/",
+        "README.md",
+    },
+    .dependencies = .{
+        .zparser = .{ .path = "../z-parser" },
+        .zstatements = .{ .path = "../z-statements" },
+    },
+}

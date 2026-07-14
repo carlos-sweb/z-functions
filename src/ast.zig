@@ -1,0 +1,49 @@
+const zparser = @import("zparser");
+const zstatements = @import("zstatements");
+
+pub const Param = struct {
+    binding: zstatements.BindingName,
+    default: ?*zparser.Node,
+};
+
+/// Same shape as a plain param's binding; rest never has a default.
+pub const RestParam = zstatements.BindingName;
+
+pub const Params = struct {
+    items: []const Param,
+    rest: ?RestParam,
+};
+
+pub const FunctionBody = union(enum) {
+    block: *zstatements.Statement, // always a `.block`-kind Statement
+    /// Arrow "concise body": a single AssignmentExpression, implicitly
+    /// returned. Only arrows can have this form.
+    expression: *zparser.Node,
+};
+
+pub const FunctionKind = union(enum) {
+    function_decl: struct { name: []const u8 }, // always required
+    function_expr: struct { name: ?[]const u8 }, // anonymous is legal
+    arrow: void, // arrows are never named
+};
+
+pub const FunctionNode = struct {
+    start: usize,
+    end: usize,
+    kind: FunctionKind,
+    params: Params,
+    body: FunctionBody,
+};
+
+/// Recovers a typed FunctionNode from the opaque pointer stored in either
+/// `zparser.NodeData.function_like` or `zstatements.StatementData.function_declaration`.
+pub fn asFunctionNode(ptr: *anyopaque) *FunctionNode {
+    return @ptrCast(@alignCast(ptr));
+}
+
+pub fn functionBodyEnd(body: FunctionBody) usize {
+    return switch (body) {
+        .block => |b| b.end,
+        .expression => |e| e.end,
+    };
+}
