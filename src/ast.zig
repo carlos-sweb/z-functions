@@ -2,11 +2,13 @@ const zparser = @import("zparser");
 const zstatements = @import("zstatements");
 
 pub const Param = struct {
-    binding: zstatements.BindingName,
+    /// Identifier or destructuring pattern (`function f([a, b], {x}) ...`).
+    pattern: *zstatements.BindingPattern,
     default: ?*zparser.Node,
 };
 
-/// Same shape as a plain param's binding; rest never has a default.
+/// Identifier only (narrowed -- the real spec allows `...[a, b]` here too);
+/// rest never has a default.
 pub const RestParam = zstatements.BindingName;
 
 pub const Params = struct {

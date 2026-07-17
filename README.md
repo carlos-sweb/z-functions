@@ -16,7 +16,7 @@ Functions and arrow functions are **expressions** — they can appear anywhere i
 **Solution: hooks/callbacks**, small additive changes to both upstream repos (matching the pattern already used when `z-statements` needed `z-parser` to expose `pub advance`/`pub expect`/`parseAssignmentExpression`):
 
 - `z-parser` gained `Parser.function_hooks: ?FunctionHooks` (default `null`, zero behavior change when unset), a `.function_like: *anyopaque` `NodeData` variant it never dereferences, and the disambiguation logic itself (`parseAssignment` does a lexer-rewind peek for the bare-identifier arrow form `a => ...`, and a pure token-skipping paren-depth scan for `(...) => ...` — not a speculative real parse, since the existing `(`-expression parser has no way to represent `()` or `(...rest)` to "reinterpret" in the first place).
-- `z-statements` gained `Parser.statement_hooks: ?StatementHooks`, a `.function_declaration: *anyopaque` `StatementData` variant, and `pub`-ified `parseBlockStatement`/`parseBindingName` (a function body is exactly `{ StatementList }`; a parameter is exactly a `BindingName`, reusing the same `DestructuringBindingNotSupported` rejection already used for `var`/`let`/`const`/`catch`/for-in-of bindings).
+- `z-statements` gained `Parser.statement_hooks: ?StatementHooks`, a `.function_declaration: *anyopaque` `StatementData` variant, and `pub`-ified `parseBlockStatement`/`parseBindingName`/`parseBindingPattern` (a function body is exactly `{ StatementList }`; a parameter is exactly a `BindingPattern` — identifier or destructuring — reusing the exact same grammar used for `var`/`let`/`const`/`catch`/for-in-of bindings).
 
 ## Design
 
@@ -31,7 +31,7 @@ Functions and arrow functions are **expressions** — they can appear anywhere i
 - **Async/`await`**: `async` stays a plain contextual `.identifier` (per `z-lexer`'s own design); `async function(){}` / `async () => {}` parse permissively into a semantically-wrong-but-non-crashing tree, no special-casing.
 - **Classes**, `extends`, `super`, methods.
 - **Object literal method/getter/setter shorthand** (`{ method() {}, get x() {} }`) — technically unblocked now that function bodies exist, deferred as the natural next narrow phase.
-- **Destructuring parameters** (`function f([a]) {}`, `(a, {b}) => {}`) — rejected via the same `DestructuringBindingNotSupported` used everywhere else in this ecosystem. (Confirmed via real Node.js that this is *more* restrictive than real ECMA-262, which does allow destructured parameters — a deliberate, documented deviation, not an oversight.)
+- **Rest parameter is identifier-only** (`(...[a, b]) => {}` is legal in real ECMA-262 but rejected here as `Params.rest` stays a plain `BindingName`) — destructuring *parameters* themselves (`function f([a]) {}`, `(a, {b = 1}) => {}`, pattern defaults, whole-param defaults like `({x} = {})`) are fully supported via z-statements' `parseBindingPattern`.
 - **`FunctionDeclaration` restricted to StatementList/Block position** (Annex B relaxes this in sloppy mode) — not enforced; no strict-mode tracking exists anywhere in this ecosystem yet.
 - **The real `[lookahead ≠ let, async, function, class, @]` early-error and cover-grammar edge cases** around `async` arrow detection specifically — out of scope since async itself is out of scope.
 

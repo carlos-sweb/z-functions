@@ -37,7 +37,7 @@ test "curried arrows nest and right-associate naturally" {
             try testing.expect(outer.body == .expression);
             try testing.expect(outer.body.expression.data == .function_like);
             const inner = zfunctions.asFunctionNode(outer.body.expression.data.function_like);
-            try testing.expectEqualStrings("b", inner.params.items[0].binding.name);
+            try testing.expectEqualStrings("b", inner.params.items[0].pattern.identifier.name);
         }
     }.check);
 }

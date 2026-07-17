@@ -89,7 +89,7 @@ pub const Parser = struct {
     // Plain `try` works throughout, including for this repo's own new
     // variants.
 
-    /// `(` (BindingIdentifier ('=' AssignmentExpression)? (',' same)*)? (',' '...' BindingIdentifier)? ')`
+    /// `(` (BindingPattern ('=' AssignmentExpression)? (',' same)*)? (',' '...' BindingIdentifier)? ')`
     fn parseParams(self: *Parser, parser: *zparser.Parser) ParseError!ast.Params {
         _ = try parser.expect(.punct_lparen);
         var items: std.ArrayList(ast.Param) = .empty;
@@ -102,13 +102,13 @@ pub const Parser = struct {
                 rest = binding;
                 break;
             }
-            const binding = try self.stmt_parser.parseBindingName();
+            const pattern = try self.stmt_parser.parseBindingPattern();
             var default: ?*zparser.Node = null;
             if (parser.current.type == .punct_assign) {
                 try parser.advance();
                 default = try parser.parseAssignmentExpression();
             }
-            try items.append(self.arena, .{ .binding = binding, .default = default });
+            try items.append(self.arena, .{ .pattern = pattern, .default = default });
             if (parser.current.type != .punct_rparen) _ = try parser.expect(.punct_comma);
         }
         _ = try parser.expect(.punct_rparen);
@@ -141,7 +141,9 @@ fn arrowFunctionHook(ctx: *anyopaque, parser: *zparser.Parser) zparser.ParseErro
             self.last_error = err;
             return zparser.ParseError.UnexpectedToken;
         };
-        const single = try self.arena.dupe(ast.Param, &.{.{ .binding = binding, .default = null }});
+        const id = try self.arena.create(zstatements.BindingPattern);
+        id.* = .{ .identifier = binding };
+        const single = try self.arena.dupe(ast.Param, &.{.{ .pattern = id, .default = null }});
         params = .{ .items = single, .rest = null };
     }
     _ = try parser.expect(.punct_arrow);

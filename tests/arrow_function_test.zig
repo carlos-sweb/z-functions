@@ -15,7 +15,7 @@ test "bare identifier arrow, no parens" {
             const fnode = arrowOf(node);
             try testing.expect(fnode.kind == .arrow);
             try testing.expectEqual(@as(usize, 1), fnode.params.items.len);
-            try testing.expectEqualStrings("a", fnode.params.items[0].binding.name);
+            try testing.expectEqualStrings("a", fnode.params.items[0].pattern.identifier.name);
             try testing.expect(fnode.body == .expression);
         }
     }.check);
