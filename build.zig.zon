@@ -11,6 +11,7 @@
         "README.md",
     },
     .dependencies = .{
+        .zlexer = .{ .path = "../z-lexer" },
         .zparser = .{ .path = "../z-parser" },
         .zstatements = .{ .path = "../z-statements" },
     },

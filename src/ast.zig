@@ -47,6 +47,37 @@ pub fn asFunctionNode(ptr: *anyopaque) *FunctionNode {
     return @ptrCast(@alignCast(ptr));
 }
 
+pub const ClassElementKind = enum { method, get, set };
+
+pub const ClassElement = struct {
+    kind: ClassElementKind,
+    /// Identifier/keyword/string keys only -- computed class-body keys
+    /// are out of scope for this phase (object literals do have them).
+    key: []const u8,
+    is_static: bool,
+    /// Always a `.method`-kind FunctionNode; the constructor is the
+    /// non-static method element whose key is "constructor".
+    function: *FunctionNode,
+};
+
+pub const ClassNode = struct {
+    start: usize,
+    end: usize,
+    /// null only for anonymous class *expressions*; declarations require
+    /// a name (MissingClassName).
+    name: ?[]const u8,
+    /// Arbitrary LeftHandSideExpression after `extends` (`class B extends
+    /// mixin(A)` is legal); runtime demands a constructable function.
+    superclass: ?*zparser.Node,
+    elements: []const ClassElement,
+};
+
+/// Recovers a typed ClassNode from the opaque pointer stored in either
+/// `zparser.NodeData.class_like` or `zstatements.StatementData.class_declaration`.
+pub fn asClassNode(ptr: *anyopaque) *ClassNode {
+    return @ptrCast(@alignCast(ptr));
+}
+
 pub fn functionBodyEnd(body: FunctionBody) usize {
     return switch (body) {
         .block => |b| b.end,

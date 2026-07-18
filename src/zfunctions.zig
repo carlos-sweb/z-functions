@@ -8,6 +8,10 @@ pub const FunctionBody = ast_mod.FunctionBody;
 pub const FunctionKind = ast_mod.FunctionKind;
 pub const FunctionNode = ast_mod.FunctionNode;
 pub const asFunctionNode = ast_mod.asFunctionNode;
+pub const ClassElementKind = ast_mod.ClassElementKind;
+pub const ClassElement = ast_mod.ClassElement;
+pub const ClassNode = ast_mod.ClassNode;
+pub const asClassNode = ast_mod.asClassNode;
 
 pub const Parser = parser_mod.Parser;
 pub const ParseError = parser_mod.ParseError;

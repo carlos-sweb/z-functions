@@ -4,6 +4,9 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const zlexer_dep = b.dependency("zlexer", .{ .target = target, .optimize = optimize });
+    const zlexer_module = zlexer_dep.module("zlexer");
+
     const zparser_dep = b.dependency("zparser", .{ .target = target, .optimize = optimize });
     const zparser_module = zparser_dep.module("zparser");
 
@@ -13,6 +16,7 @@ pub fn build(b: *std.Build) void {
     const zfunctions_module = b.addModule("zfunctions", .{
         .root_source_file = b.path("src/zfunctions.zig"),
     });
+    zfunctions_module.addImport("zlexer", zlexer_module);
     zfunctions_module.addImport("zparser", zparser_module);
     zfunctions_module.addImport("zstatements", zstatements_module);
 
@@ -24,6 +28,7 @@ pub fn build(b: *std.Build) void {
         "tests/arrow_function_test.zig",
         "tests/parameters_test.zig",
         "tests/method_test.zig",
+        "tests/class_test.zig",
         "tests/integration_test.zig",
     };
 
