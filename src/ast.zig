@@ -39,6 +39,13 @@ pub const FunctionNode = struct {
     kind: FunctionKind,
     params: Params,
     body: FunctionBody,
+    /// `function* f()` -- calling it builds a generator object instead of
+    /// running the body; `yield` is grammatical inside.
+    is_generator: bool = false,
+    /// `async function f()` -- calling it returns a promise; `await` is
+    /// grammatical inside. Both flags set = `async function*` (parses;
+    /// the interpreter rejects async generators at runtime for now).
+    is_async: bool = false,
 };
 
 /// Recovers a typed FunctionNode from the opaque pointer stored in either

@@ -173,6 +173,12 @@ pub const Parser = struct {
     /// a `.method`-kind FunctionNode (non-constructable, named).
     fn parseClassMethodBody(self: *Parser, parser: *zparser.Parser, kind: ast.ClassElementKind, name: []const u8) ParseError!*ast.FunctionNode {
         const start = parser.current.start;
+        // Class methods are neither generators nor async in this phase.
+        const saved_flags = setBodyFlags(parser, false, false);
+        defer {
+            parser.yield_allowed = saved_flags.y;
+            parser.await_allowed = saved_flags.a;
+        }
         const params = try self.parseParams(parser);
         switch (kind) {
             .get => if (params.items.len != 0 or params.rest != null) return ParseError.GetterCannotHaveParameters,
@@ -282,6 +288,13 @@ fn selfFromCtx(ctx: *anyopaque) *Parser {
 fn arrowFunctionHook(ctx: *anyopaque, parser: *zparser.Parser) zparser.ParseError!zparser.FunctionHookResult {
     const self = selfFromCtx(ctx);
     const start = parser.current.start;
+    // Arrows are neither generators nor async (async arrows deferred) --
+    // yield/await turn off inside, per the real per-body scoping.
+    const saved_flags = setBodyFlags(parser, false, false);
+    defer {
+        parser.yield_allowed = saved_flags.y;
+        parser.await_allowed = saved_flags.a;
+    }
     var params: ast.Params = undefined;
     if (parser.current.type == .punct_lparen) {
         params = self.parseParams(parser) catch |err| {
@@ -308,10 +321,41 @@ fn arrowFunctionHook(ctx: *anyopaque, parser: *zparser.Parser) zparser.ParseErro
     return .{ .node = node, .end = node.end };
 }
 
+/// Consumes the optional `async` (contextual identifier) and, after
+/// `function`, the optional `*` -- shared by both function hooks. The
+/// caller guarantees `async` is only present when `function` follows.
+fn parseFunctionFlags(parser: *zparser.Parser) zparser.ParseError!struct { is_async: bool, is_generator: bool } {
+    var is_async = false;
+    if (parser.current.type == .identifier) {
+        // Only ever reached with 'async' as the current identifier.
+        is_async = true;
+        try parser.advance();
+    }
+    _ = try parser.expect(.keyword_function);
+    var is_generator = false;
+    if (parser.current.type == .punct_star) {
+        is_generator = true;
+        try parser.advance();
+    }
+    return .{ .is_async = is_async, .is_generator = is_generator };
+}
+
+const SavedFlags = struct { y: bool, a: bool };
+
+/// yield/await are grammatical strictly per-body: parameters never allow
+/// them, and a nested non-generator/non-async body turns them back off.
+/// Returns the previous flags for the caller's defer-restore.
+fn setBodyFlags(parser: *zparser.Parser, is_generator: bool, is_async: bool) SavedFlags {
+    const saved: SavedFlags = .{ .y = parser.yield_allowed, .a = parser.await_allowed };
+    parser.yield_allowed = is_generator;
+    parser.await_allowed = is_async;
+    return saved;
+}
+
 fn functionExpressionHook(ctx: *anyopaque, parser: *zparser.Parser) zparser.ParseError!zparser.FunctionHookResult {
     const self = selfFromCtx(ctx);
     const start = parser.current.start;
-    try parser.advance(); // 'function'
+    const flags = try parseFunctionFlags(parser);
     var name: ?[]const u8 = null;
     if (parser.current.type == .identifier) {
         const binding = self.stmt_parser.parseBindingName() catch |err| {
@@ -320,10 +364,19 @@ fn functionExpressionHook(ctx: *anyopaque, parser: *zparser.Parser) zparser.Pars
         };
         name = binding.name;
     }
+    const saved_params = setBodyFlags(parser, false, false);
     const params = self.parseParams(parser) catch |err| {
+        parser.yield_allowed = saved_params.y;
+        parser.await_allowed = saved_params.a;
         self.last_error = err;
         return zparser.ParseError.UnexpectedToken;
     };
+    parser.yield_allowed = flags.is_generator;
+    parser.await_allowed = flags.is_async;
+    defer {
+        parser.yield_allowed = saved_params.y;
+        parser.await_allowed = saved_params.a;
+    }
     const body_stmt = self.stmt_parser.parseBlockStatement() catch |err| {
         self.last_error = err;
         return zparser.ParseError.UnexpectedToken;
@@ -335,6 +388,8 @@ fn functionExpressionHook(ctx: *anyopaque, parser: *zparser.Parser) zparser.Pars
         .kind = .{ .function_expr = .{ .name = name } },
         .params = params,
         .body = .{ .block = body_stmt },
+        .is_generator = flags.is_generator,
+        .is_async = flags.is_async,
     };
     return .{ .node = node, .end = node.end };
 }
@@ -342,6 +397,12 @@ fn functionExpressionHook(ctx: *anyopaque, parser: *zparser.Parser) zparser.Pars
 fn methodHook(ctx: *anyopaque, parser: *zparser.Parser, kind: zparser.MethodKind, name: []const u8) zparser.ParseError!zparser.FunctionHookResult {
     const self = selfFromCtx(ctx);
     const start = parser.current.start;
+    // Methods are neither generators nor async in this phase.
+    const saved_flags = setBodyFlags(parser, false, false);
+    defer {
+        parser.yield_allowed = saved_flags.y;
+        parser.await_allowed = saved_flags.a;
+    }
     const params = self.parseParams(parser) catch |err| {
         self.last_error = err;
         return zparser.ParseError.UnexpectedToken;
@@ -395,16 +456,26 @@ fn classDeclarationHook(ctx: *anyopaque, parser: *zparser.Parser) zstatements.Pa
 fn functionDeclarationHook(ctx: *anyopaque, parser: *zparser.Parser) zstatements.ParseError!zstatements.StatementHookResult {
     const self = selfFromCtx(ctx);
     const start = parser.current.start;
-    try parser.advance(); // 'function'
+    const flags = parseFunctionFlags(parser) catch |err| {
+        self.last_error = err;
+        return zstatements.ParseError.UnexpectedToken;
+    };
     if (parser.current.type != .identifier) {
         self.last_error = ParseError.MissingFunctionName;
         return zstatements.ParseError.UnexpectedToken;
     }
     const binding = try self.stmt_parser.parseBindingName(); // zstatements-typed already, try normal
+    const saved = setBodyFlags(parser, false, false);
+    defer {
+        parser.yield_allowed = saved.y;
+        parser.await_allowed = saved.a;
+    }
     const params = self.parseParams(parser) catch |err| {
         self.last_error = err;
         return zstatements.ParseError.UnexpectedToken;
     };
+    parser.yield_allowed = flags.is_generator;
+    parser.await_allowed = flags.is_async;
     const body_stmt = try self.stmt_parser.parseBlockStatement(); // zstatements-typed already, try normal
     const node = try self.arena.create(ast.FunctionNode);
     node.* = .{
@@ -413,6 +484,8 @@ fn functionDeclarationHook(ctx: *anyopaque, parser: *zparser.Parser) zstatements
         .kind = .{ .function_decl = .{ .name = binding.name } },
         .params = params,
         .body = .{ .block = body_stmt },
+        .is_generator = flags.is_generator,
+        .is_async = flags.is_async,
     };
     return .{ .node = node, .end = node.end };
 }
