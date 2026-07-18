@@ -30,7 +30,7 @@ Functions and arrow functions are **expressions** — they can appear anywhere i
 - **Generators** (`function*`), **`yield`**.
 - **Async/`await`**: `async` stays a plain contextual `.identifier` (per `z-lexer`'s own design); `async function(){}` / `async () => {}` parse permissively into a semantically-wrong-but-non-crashing tree, no special-casing.
 - **Classes**, `extends`, `super`, methods.
-- **Object literal method/getter/setter shorthand** (`{ method() {}, get x() {} }`) — technically unblocked now that function bodies exist, deferred as the natural next narrow phase.
+- ~~Object literal method/getter/setter shorthand~~ — implemented: the `parseMethod` hook parses `m() {}` / `get x() {}` / `set x(v) {}` bodies (kind `.method` on `FunctionKind`, never constructable, named after the key), with the real arity early errors as precise variants (`GetterCannotHaveParameters`, `SetterMustHaveExactlyOneParameter`) via the same `last_error` side channel.
 - **Rest parameter is identifier-only** (`(...[a, b]) => {}` is legal in real ECMA-262 but rejected here as `Params.rest` stays a plain `BindingName`) — destructuring *parameters* themselves (`function f([a]) {}`, `(a, {b = 1}) => {}`, pattern defaults, whole-param defaults like `({x} = {})`) are fully supported via z-statements' `parseBindingPattern`.
 - **`FunctionDeclaration` restricted to StatementList/Block position** (Annex B relaxes this in sloppy mode) — not enforced; no strict-mode tracking exists anywhere in this ecosystem yet.
 - **The real `[lookahead ≠ let, async, function, class, @]` early-error and cover-grammar edge cases** around `async` arrow detection specifically — out of scope since async itself is out of scope.

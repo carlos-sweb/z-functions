@@ -27,6 +27,10 @@ pub const FunctionKind = union(enum) {
     function_decl: struct { name: []const u8 }, // always required
     function_expr: struct { name: ?[]const u8 }, // anonymous is legal
     arrow: void, // arrows are never named
+    /// Object-literal method / getter / setter body. `name` is the
+    /// property key's source text ("" for computed keys). Methods are not
+    /// constructors and never self-bind their name.
+    method: struct { name: []const u8 },
 };
 
 pub const FunctionNode = struct {

@@ -23,6 +23,7 @@ pub fn build(b: *std.Build) void {
         "tests/function_expression_test.zig",
         "tests/arrow_function_test.zig",
         "tests/parameters_test.zig",
+        "tests/method_test.zig",
         "tests/integration_test.zig",
     };
 

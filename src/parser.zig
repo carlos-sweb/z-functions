@@ -17,6 +17,11 @@ pub const ParseError = error{
     /// (`(a, ...b,)` -- unlike ordinary trailing commas, which ARE allowed
     /// after regular params).
     RestParameterMustBeLast,
+    /// `{ get x(a) {} }` -- getters take no parameters (real early error).
+    GetterCannotHaveParameters,
+    /// `{ set x() {} }` / `{ set x(a, b) {} }` / `{ set x(...a) {} }` --
+    /// setters take exactly one non-rest parameter (real early error).
+    SetterMustHaveExactlyOneParameter,
 } || zstatements.ParseError;
 
 pub const Parser = struct {
@@ -49,6 +54,7 @@ pub const Parser = struct {
             .ctx = self,
             .parseArrowFunction = arrowFunctionHook,
             .parseFunctionExpression = functionExpressionHook,
+            .parseMethod = methodHook,
         };
         self.stmt_parser.statement_hooks = .{
             .ctx = self,
@@ -181,6 +187,41 @@ fn functionExpressionHook(ctx: *anyopaque, parser: *zparser.Parser) zparser.Pars
         .start = start,
         .end = body_stmt.end,
         .kind = .{ .function_expr = .{ .name = name } },
+        .params = params,
+        .body = .{ .block = body_stmt },
+    };
+    return .{ .node = node, .end = node.end };
+}
+
+fn methodHook(ctx: *anyopaque, parser: *zparser.Parser, kind: zparser.MethodKind, name: []const u8) zparser.ParseError!zparser.FunctionHookResult {
+    const self = selfFromCtx(ctx);
+    const start = parser.current.start;
+    const params = self.parseParams(parser) catch |err| {
+        self.last_error = err;
+        return zparser.ParseError.UnexpectedToken;
+    };
+    // Real early errors: getters take no parameters, setters exactly one
+    // (rest included in "no"/"one" -- `set x(...a)` is a SyntaxError too).
+    switch (kind) {
+        .get => if (params.items.len != 0 or params.rest != null) {
+            self.last_error = ParseError.GetterCannotHaveParameters;
+            return zparser.ParseError.UnexpectedToken;
+        },
+        .set => if (params.items.len != 1 or params.rest != null) {
+            self.last_error = ParseError.SetterMustHaveExactlyOneParameter;
+            return zparser.ParseError.UnexpectedToken;
+        },
+        .method => {},
+    }
+    const body_stmt = self.stmt_parser.parseBlockStatement() catch |err| {
+        self.last_error = err;
+        return zparser.ParseError.UnexpectedToken;
+    };
+    const node = try self.arena.create(ast.FunctionNode);
+    node.* = .{
+        .start = start,
+        .end = body_stmt.end,
+        .kind = .{ .method = .{ .name = name } },
         .params = params,
         .body = .{ .block = body_stmt },
     };
