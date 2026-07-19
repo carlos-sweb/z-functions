@@ -171,9 +171,10 @@ pub const Parser = struct {
     /// `(params) { body }` for one class element, with the same accessor
     /// arity early errors the object-literal methodHook enforces. Always
     /// a `.method`-kind FunctionNode (non-constructable, named).
-    fn parseClassMethodBody(self: *Parser, parser: *zparser.Parser, kind: ast.ClassElementKind, name: []const u8) ParseError!*ast.FunctionNode {
+    fn parseClassMethodBody(self: *Parser, parser: *zparser.Parser, kind: ast.ClassElementKind, name: []const u8, is_generator: bool, is_async: bool) ParseError!*ast.FunctionNode {
         const start = parser.current.start;
-        // Class methods are neither generators nor async in this phase.
+        // Params never allow yield/await; the body does per the method's
+        // generator/async-ness.
         const saved_flags = setBodyFlags(parser, false, false);
         defer {
             parser.yield_allowed = saved_flags.y;
@@ -185,6 +186,8 @@ pub const Parser = struct {
             .set => if (params.items.len != 1 or params.rest != null) return ParseError.SetterMustHaveExactlyOneParameter,
             .method => {},
         }
+        parser.yield_allowed = is_generator;
+        parser.await_allowed = is_async;
         const body_stmt = try self.stmt_parser.parseBlockStatement();
         const node = try self.arena.create(ast.FunctionNode);
         node.* = .{
@@ -193,6 +196,8 @@ pub const Parser = struct {
             .kind = .{ .method = .{ .name = name } },
             .params = params,
             .body = .{ .block = body_stmt },
+            .is_generator = is_generator,
+            .is_async = is_async,
         };
         return node;
     }
@@ -240,8 +245,24 @@ pub const Parser = struct {
                 try parser.advance();
             }
 
+            // `async` / `*` method prefixes (contextual `async`, same
+            // one-token lookahead as static/get/set).
+            var is_async = false;
+            var is_generator = false;
+            if (parser.current.type == .identifier and
+                std.mem.eql(u8, parser.current.owned_value orelse parser.current.lexeme, "async") and
+                (try parser.peekNextType()) != .punct_lparen)
+            {
+                is_async = true;
+                try parser.advance();
+            }
+            if (parser.current.type == .punct_star) {
+                is_generator = true;
+                try parser.advance();
+            }
+
             var kind: ast.ClassElementKind = .method;
-            if (parser.current.type == .identifier) {
+            if (!is_generator and !is_async and parser.current.type == .identifier) {
                 const lex = parser.current.owned_value orelse parser.current.lexeme;
                 const acc: ?ast.ClassElementKind = if (std.mem.eql(u8, lex, "get"))
                     .get
@@ -258,12 +279,12 @@ pub const Parser = struct {
             const key = try self.parseClassElementKey(parser);
             if (!is_static and std.mem.eql(u8, key, "constructor")) {
                 // (A *static* method named constructor is legal, per spec.)
-                if (kind != .method) return ParseError.ConstructorCannotBeAccessor;
+                if (kind != .method or is_generator or is_async) return ParseError.ConstructorCannotBeAccessor;
                 if (seen_constructor) return ParseError.DuplicateConstructor;
                 seen_constructor = true;
             }
 
-            const fnode = try self.parseClassMethodBody(parser, kind, key);
+            const fnode = try self.parseClassMethodBody(parser, kind, key, is_generator, is_async);
             try elements.append(self.arena, .{ .kind = kind, .key = key, .is_static = is_static, .function = fnode });
         }
         const end = parser.current.end;
@@ -288,8 +309,19 @@ fn selfFromCtx(ctx: *anyopaque) *Parser {
 fn arrowFunctionHook(ctx: *anyopaque, parser: *zparser.Parser) zparser.ParseError!zparser.FunctionHookResult {
     const self = selfFromCtx(ctx);
     const start = parser.current.start;
-    // Arrows are neither generators nor async (async arrows deferred) --
-    // yield/await turn off inside, per the real per-body scoping.
+    // `async` arrow: z-parser routed us here with current at `async`.
+    var is_async = false;
+    if (parser.current.type == .identifier and
+        std.mem.eql(u8, parser.current.owned_value orelse parser.current.lexeme, "async"))
+    {
+        is_async = true;
+        parser.advance() catch |err| {
+            self.last_error = err;
+            return zparser.ParseError.UnexpectedToken;
+        };
+    }
+    // Params never allow yield/await; an async arrow's body allows await
+    // (arrows are never generators).
     const saved_flags = setBodyFlags(parser, false, false);
     defer {
         parser.yield_allowed = saved_flags.y;
@@ -312,12 +344,13 @@ fn arrowFunctionHook(ctx: *anyopaque, parser: *zparser.Parser) zparser.ParseErro
         params = .{ .items = single, .rest = null };
     }
     _ = try parser.expect(.punct_arrow);
+    parser.await_allowed = is_async;
     const body = self.parseArrowBody(parser) catch |err| {
         self.last_error = err;
         return zparser.ParseError.UnexpectedToken;
     };
     const node = try self.arena.create(ast.FunctionNode);
-    node.* = .{ .start = start, .end = ast.functionBodyEnd(body), .kind = .arrow, .params = params, .body = body };
+    node.* = .{ .start = start, .end = ast.functionBodyEnd(body), .kind = .arrow, .params = params, .body = body, .is_async = is_async };
     return .{ .node = node, .end = node.end };
 }
 
@@ -394,10 +427,11 @@ fn functionExpressionHook(ctx: *anyopaque, parser: *zparser.Parser) zparser.Pars
     return .{ .node = node, .end = node.end };
 }
 
-fn methodHook(ctx: *anyopaque, parser: *zparser.Parser, kind: zparser.MethodKind, name: []const u8) zparser.ParseError!zparser.FunctionHookResult {
+fn methodHook(ctx: *anyopaque, parser: *zparser.Parser, kind: zparser.MethodKind, name: []const u8, is_generator: bool, is_async: bool) zparser.ParseError!zparser.FunctionHookResult {
     const self = selfFromCtx(ctx);
     const start = parser.current.start;
-    // Methods are neither generators nor async in this phase.
+    // Params never allow yield/await; the body does, per the method's
+    // own generator/async-ness.
     const saved_flags = setBodyFlags(parser, false, false);
     defer {
         parser.yield_allowed = saved_flags.y;
@@ -420,6 +454,8 @@ fn methodHook(ctx: *anyopaque, parser: *zparser.Parser, kind: zparser.MethodKind
         },
         .method => {},
     }
+    parser.yield_allowed = is_generator;
+    parser.await_allowed = is_async;
     const body_stmt = self.stmt_parser.parseBlockStatement() catch |err| {
         self.last_error = err;
         return zparser.ParseError.UnexpectedToken;
@@ -431,6 +467,8 @@ fn methodHook(ctx: *anyopaque, parser: *zparser.Parser, kind: zparser.MethodKind
         .kind = .{ .method = .{ .name = name } },
         .params = params,
         .body = .{ .block = body_stmt },
+        .is_generator = is_generator,
+        .is_async = is_async,
     };
     return .{ .node = node, .end = node.end };
 }

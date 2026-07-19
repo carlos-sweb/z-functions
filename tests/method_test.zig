@@ -66,3 +66,26 @@ test "accessor arity is validated with precise errors" {
 test "methods are invalid destructuring assignment targets" {
     try helpers.expectParseError("({ m() {} } = x);", zfunctions.ParseError.InvalidAssignmentTarget);
 }
+
+test "generator and async method flags on the FunctionNode" {
+    try helpers.parseExprAndCheck("({ *gen() {}, async af() {}, async *ag() {} })", {}, struct {
+        fn check(_: void, node: *zparser.Node) !void {
+            const els = node.data.paren.data.object_literal;
+            const gen = zfunctions.asFunctionNode(els[0].property.value.data.function_like);
+            try testing.expect(gen.is_generator and !gen.is_async);
+            const af = zfunctions.asFunctionNode(els[1].property.value.data.function_like);
+            try testing.expect(af.is_async and !af.is_generator);
+            const ag = zfunctions.asFunctionNode(els[2].property.value.data.function_like);
+            try testing.expect(ag.is_generator and ag.is_async);
+        }
+    }.check);
+}
+
+test "async arrow sets is_async" {
+    try helpers.parseExprAndCheck("async (x) => x", {}, struct {
+        fn check(_: void, node: *zparser.Node) !void {
+            const fnode = zfunctions.asFunctionNode(node.data.function_like);
+            try testing.expect(fnode.kind == .arrow and fnode.is_async);
+        }
+    }.check);
+}

@@ -80,3 +80,16 @@ test "a static method named constructor is legal" {
         }
     }.check);
 }
+
+test "generator and async class methods carry the flags; async constructor is rejected" {
+    try helpers.parseAndCheck("class C { *m() {} async a() {} static async *sg() {} }", {}, struct {
+        fn check(_: void, stmt: *zstatements.Statement) !void {
+            const cnode = zfunctions.asClassNode(stmt.data.class_declaration);
+            try testing.expect(cnode.elements[0].function.is_generator);
+            try testing.expect(cnode.elements[1].function.is_async);
+            try testing.expect(cnode.elements[2].is_static and cnode.elements[2].function.is_generator and cnode.elements[2].function.is_async);
+        }
+    }.check);
+    try helpers.expectParseError("class C { async constructor() {} }", zfunctions.ParseError.ConstructorCannotBeAccessor);
+    try helpers.expectParseError("class C { *constructor() {} }", zfunctions.ParseError.ConstructorCannotBeAccessor);
+}
