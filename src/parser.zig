@@ -141,31 +141,61 @@ pub const Parser = struct {
 
     // ===== Class grammar (ECMA-262 section 15.7, narrowed) =====
 
-    /// Identifier, keyword (`delete() {}` is a legal method name), or
-    /// string-literal keys. Computed class-body keys are out of scope for
-    /// this phase (object literals do have them).
-    fn parseClassElementKey(self: *Parser, parser: *zparser.Parser) ParseError![]const u8 {
-        _ = self;
+    /// One class-element key: identifier, keyword (`delete() {}` is a legal
+    /// method name), string literal, numeric literal (pre-formatted to its
+    /// string form), `#private` name, or a `[computed]` expression.
+    fn parseClassElementKey(self: *Parser, parser: *zparser.Parser) ParseError!ast.ClassKey {
         const tok = parser.current;
         switch (tok.type) {
             .identifier => {
                 const text = tok.owned_value orelse tok.lexeme;
                 try parser.advance();
-                return text;
+                return .{ .ident = text };
+            },
+            .private_identifier => {
+                // Lexeme includes the '#'; keep it -- '#'-prefixed keys can
+                // never collide with ordinary identifier keys.
+                const text = tok.owned_value orelse tok.lexeme;
+                try parser.advance();
+                return .{ .private = text };
             },
             .string_literal => {
                 const v = tok.owned_value orelse tok.lexeme[1 .. tok.lexeme.len - 1];
                 try parser.advance();
-                return v;
+                return .{ .ident = v };
+            },
+            .numeric_literal => {
+                // `class A { 1() {} }` -- the key is the number's string
+                // form. std.fmt's shortest form matches Number::toString for
+                // the common cases (integers, simple decimals) -- narrowed.
+                const n = tok.numeric_value orelse return ParseError.UnexpectedToken;
+                const text = std.fmt.allocPrint(self.arena, "{d}", .{n}) catch return ParseError.OutOfMemory;
+                try parser.advance();
+                return .{ .ident = text };
+            },
+            .punct_lbracket => {
+                try parser.advance();
+                const expr = try parser.parseAssignmentExpression();
+                _ = try parser.expect(.punct_rbracket);
+                return .{ .computed = expr };
             },
             else => {
                 if (zlexer.keywordFromLexeme(tok.lexeme) != null) {
                     try parser.advance();
-                    return tok.lexeme;
+                    return .{ .ident = tok.lexeme };
                 }
                 return ParseError.UnexpectedToken;
             },
         }
+    }
+
+    /// True when the token after a candidate contextual modifier
+    /// (`static`/`async`/`get`/`set`) means the word is actually an element
+    /// NAME, not a modifier: `static() {}` (method), `static = 1` /
+    /// `static;` / `static}` (fields named "static").
+    fn modifierIsElementName(next: zlexer.TokenType) bool {
+        return next == .punct_lparen or next == .punct_assign or
+            next == .punct_semi or next == .punct_rbrace;
     }
 
     /// `(params) { body }` for one class element, with the same accessor
@@ -185,6 +215,9 @@ pub const Parser = struct {
             .get => if (params.items.len != 0 or params.rest != null) return ParseError.GetterCannotHaveParameters,
             .set => if (params.items.len != 1 or params.rest != null) return ParseError.SetterMustHaveExactlyOneParameter,
             .method => {},
+            // Fields and static blocks never route through here (fields have
+            // no params/body; static blocks are built inline in parseClass).
+            .field, .static_block => unreachable,
         }
         parser.yield_allowed = is_generator;
         parser.await_allowed = is_async;
@@ -236,22 +269,43 @@ pub const Parser = struct {
                 continue;
             }
 
+            // Contextual modifiers: each stays an element NAME when what
+            // follows says so (`static() {}`, `static = 1`, `get;` --
+            // see modifierIsElementName).
             var is_static = false;
             if (parser.current.type == .identifier and
                 std.mem.eql(u8, parser.current.owned_value orelse parser.current.lexeme, "static") and
-                (try parser.peekNextType()) != .punct_lparen)
+                !modifierIsElementName(try parser.peekNextType()))
             {
                 is_static = true;
                 try parser.advance();
             }
 
+            // `static { ... }` -- a static initialization block, run once at
+            // class-definition time. Wrapped in a synthetic parameterless
+            // method-FunctionNode so evaluation reuses the method machinery.
+            if (is_static and parser.current.type == .punct_lbrace) {
+                const blk_start = parser.current.start;
+                const body_stmt = try self.stmt_parser.parseBlockStatement();
+                const fnode = try self.arena.create(ast.FunctionNode);
+                fnode.* = .{
+                    .start = blk_start,
+                    .end = body_stmt.end,
+                    .kind = .{ .method = .{ .name = "" } },
+                    .params = .{ .items = &.{}, .rest = null },
+                    .body = .{ .block = body_stmt },
+                };
+                try elements.append(self.arena, .{ .kind = .static_block, .key = .{ .ident = "" }, .is_static = true, .function = fnode });
+                continue;
+            }
+
             // `async` / `*` method prefixes (contextual `async`, same
-            // one-token lookahead as static/get/set).
+            // lookahead rule).
             var is_async = false;
             var is_generator = false;
             if (parser.current.type == .identifier and
                 std.mem.eql(u8, parser.current.owned_value orelse parser.current.lexeme, "async") and
-                (try parser.peekNextType()) != .punct_lparen)
+                !modifierIsElementName(try parser.peekNextType()))
             {
                 is_async = true;
                 try parser.advance();
@@ -270,21 +324,57 @@ pub const Parser = struct {
                     .set
                 else
                     null;
-                if (acc != null and (try parser.peekNextType()) != .punct_lparen) {
+                if (acc != null and !modifierIsElementName(try parser.peekNextType())) {
                     kind = acc.?;
                     try parser.advance();
                 }
             }
 
             const key = try self.parseClassElementKey(parser);
-            if (!is_static and std.mem.eql(u8, key, "constructor")) {
-                // (A *static* method named constructor is legal, per spec.)
-                if (kind != .method or is_generator or is_async) return ParseError.ConstructorCannotBeAccessor;
-                if (seen_constructor) return ParseError.DuplicateConstructor;
-                seen_constructor = true;
+            const key_name: ?[]const u8 = switch (key) {
+                .ident => |n| n,
+                .private => |n| n,
+                .computed => null,
+            };
+
+            if (parser.current.type != .punct_lparen) {
+                // FIELD definition (`x = 1;`, `#y;`, `static z = f()`).
+                // Accessor keyword before a non-method (`get x = 1`) and
+                // generator/async prefixes on a field are grammar errors.
+                if (kind != .method or is_generator or is_async) return ParseError.UnexpectedToken;
+                // A field can't be named "constructor" (nor "#constructor",
+                // which is an early error for ANY element kind).
+                if (key_name) |n| {
+                    if (std.mem.eql(u8, n, "constructor") or std.mem.eql(u8, n, "#constructor")) {
+                        return ParseError.UnexpectedToken;
+                    }
+                }
+                var value: ?*zparser.Node = null;
+                if (parser.current.type == .punct_assign) {
+                    try parser.advance();
+                    value = try parser.parseAssignmentExpression();
+                }
+                // Field declarations end with ';' or ASI; consuming an
+                // optional ';' and letting anything else start the next
+                // element is (documented) permissive about the line break.
+                if (parser.current.type == .punct_semi) try parser.advance();
+                try elements.append(self.arena, .{ .kind = .field, .key = key, .is_static = is_static, .function = null, .value = value });
+                continue;
             }
 
-            const fnode = try self.parseClassMethodBody(parser, kind, key, is_generator, is_async);
+            // METHOD / accessor (existing path).
+            if (key_name) |n| {
+                if (std.mem.eql(u8, n, "#constructor")) return ParseError.UnexpectedToken;
+                if (!is_static and std.mem.eql(u8, n, "constructor")) {
+                    // (A *static* method named constructor is legal, per spec.)
+                    if (kind != .method or is_generator or is_async) return ParseError.ConstructorCannotBeAccessor;
+                    if (seen_constructor) return ParseError.DuplicateConstructor;
+                    seen_constructor = true;
+                }
+            }
+
+            const method_name = key_name orelse "";
+            const fnode = try self.parseClassMethodBody(parser, kind, method_name, is_generator, is_async);
             try elements.append(self.arena, .{ .kind = kind, .key = key, .is_static = is_static, .function = fnode });
         }
         const end = parser.current.end;

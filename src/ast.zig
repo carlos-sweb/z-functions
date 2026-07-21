@@ -54,17 +54,34 @@ pub fn asFunctionNode(ptr: *anyopaque) *FunctionNode {
     return @ptrCast(@alignCast(ptr));
 }
 
-pub const ClassElementKind = enum { method, get, set };
+pub const ClassElementKind = enum { method, get, set, field, static_block };
+
+/// A class element's property key. Numeric keys are pre-formatted to their
+/// string form at parse time (they're ordinary string keys at runtime).
+pub const ClassKey = union(enum) {
+    /// Identifier / keyword / string-literal / numeric key.
+    ident: []const u8,
+    /// A `#name` private key, stored WITH the leading '#' (matching the
+    /// lexer's `.private_identifier` lexeme) so it can never collide with
+    /// an ordinary identifier key.
+    private: []const u8,
+    /// `[expr]` -- evaluated once, in declaration order, during
+    /// ClassDefinitionEvaluation (the interpreter's job).
+    computed: *zparser.Node,
+};
 
 pub const ClassElement = struct {
     kind: ClassElementKind,
-    /// Identifier/keyword/string keys only -- computed class-body keys
-    /// are out of scope for this phase (object literals do have them).
-    key: []const u8,
+    /// For `.static_block` this is `.{ .ident = "" }` (blocks are keyless).
+    key: ClassKey,
     is_static: bool,
-    /// Always a `.method`-kind FunctionNode; the constructor is the
-    /// non-static method element whose key is "constructor".
-    function: *FunctionNode,
+    /// Methods/accessors and static blocks carry their body here (always a
+    /// `.method`-kind FunctionNode; a static block is a synthetic
+    /// parameterless one). Null for fields.
+    function: ?*FunctionNode,
+    /// A field's initializer expression; null = no initializer (undefined).
+    /// Always null for methods/accessors/static blocks.
+    value: ?*zparser.Node = null,
 };
 
 pub const ClassNode = struct {
