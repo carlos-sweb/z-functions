@@ -74,6 +74,14 @@ pub const Parser = struct {
         return self;
     }
 
+    /// Forwards to `zstatements.Parser.setStackLimit`, which forwards to
+    /// the underlying `zparser.Parser`'s native-stack-depth guard (see
+    /// `/home/sweb/.plans/z-parser-improve.md`). Default (never called) is
+    /// `0`, i.e. disabled -- zero behavior change for existing callers.
+    pub fn setStackLimit(self: *Parser, limit: usize) void {
+        self.stmt_parser.setStackLimit(limit);
+    }
+
     // ===== Entry points =====
 
     pub fn parseProgram(self: *Parser) ParseError![]const *zstatements.Statement {
