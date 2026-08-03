@@ -114,7 +114,7 @@ pub const Parser = struct {
     // Plain `try` works throughout, including for this repo's own new
     // variants.
 
-    /// `(` (BindingPattern ('=' AssignmentExpression)? (',' same)*)? (',' '...' BindingIdentifier)? ')`
+    /// `(` (BindingPattern ('=' AssignmentExpression)? (',' same)*)? (',' '...' BindingPattern)? ')`
     fn parseParams(self: *Parser, parser: *zparser.Parser) ParseError!ast.Params {
         _ = try parser.expect(.punct_lparen);
         var items: std.ArrayList(ast.Param) = .empty;
@@ -122,7 +122,7 @@ pub const Parser = struct {
         while (parser.current.type != .punct_rparen) {
             if (parser.current.type == .punct_ellipsis) {
                 try parser.advance(); // '...'
-                const binding = try self.stmt_parser.parseBindingName();
+                const binding = try self.stmt_parser.parseBindingPattern();
                 if (parser.current.type != .punct_rparen) return ParseError.RestParameterMustBeLast;
                 rest = binding;
                 break;

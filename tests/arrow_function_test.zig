@@ -47,7 +47,7 @@ test "rest-only arrow" {
             const fnode = arrowOf(node);
             try testing.expectEqual(@as(usize, 0), fnode.params.items.len);
             try testing.expect(fnode.params.rest != null);
-            try testing.expectEqualStrings("args", fnode.params.rest.?.name);
+            try testing.expectEqualStrings("args", fnode.params.rest.?.identifier.name);
         }
     }.check);
 }
@@ -98,6 +98,16 @@ test "arrow nested mid-expression as a call argument" {
             try testing.expectEqual(@as(usize, 2), args.len);
             try testing.expect(args[0].data == .function_like);
             try testing.expect(args[1].data == .binary);
+        }
+    }.check);
+}
+
+test "rest parameter can be a destructuring pattern" {
+    try helpers.parseExprAndCheck("(...[a, b]) => a", {}, struct {
+        fn check(_: void, node: *zparser.Node) !void {
+            const fnode = arrowOf(node);
+            try testing.expect(fnode.params.rest != null);
+            try testing.expect(fnode.params.rest.?.* == .array);
         }
     }.check);
 }

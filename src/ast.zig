@@ -7,9 +7,11 @@ pub const Param = struct {
     default: ?*zparser.Node,
 };
 
-/// Identifier only (narrowed -- the real spec allows `...[a, b]` here too);
-/// rest never has a default.
-pub const RestParam = zstatements.BindingName;
+/// Identifier or destructuring pattern (`function f(...[a, b]) ...`,
+/// `function f(...{x}) ...`) -- same grammar production as `Param.pattern`
+/// above (BindingPattern already covers the plain-identifier case as its
+/// `.identifier` variant). Rest never has a default.
+pub const RestParam = *zstatements.BindingPattern;
 
 pub const Params = struct {
     items: []const Param,
