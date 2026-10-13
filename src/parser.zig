@@ -5,6 +5,7 @@ const zparser = @import("zparser");
 const zstatements = @import("zstatements");
 const ast = @import("ast.zig");
 
+/// Function/class early errors combined with upstream parsing failures.
 pub const ParseError = error{
     /// A FunctionDeclaration (statement position) had no name -- e.g.
     /// `function () {}` typed as a statement. Real ECMA-262 requires a name
@@ -33,6 +34,8 @@ pub const ParseError = error{
     ConstructorCannotBeAccessor,
 } || zstatements.ParseError;
 
+/// Combines expression and statement parsing with function and class hooks.
+/// All returned nodes use `arena`; source slices borrow the original input.
 pub const Parser = struct {
     stmt_parser: zstatements.Parser,
     arena: Allocator,
@@ -53,6 +56,9 @@ pub const Parser = struct {
     /// entry point consults it.
     last_error: ?ParseError = null,
 
+    /// Allocates a stable parser and installs hooks using `arena`.
+    /// Keep `arena` and `source` alive until the parser and its results are unused.
+    /// Returns lexical errors for invalid initial tokens or `OutOfMemory`.
     pub fn init(arena: Allocator, source: []const u8) ParseError!*Parser {
         const self = try arena.create(Parser);
         self.* = .{
@@ -84,6 +90,8 @@ pub const Parser = struct {
 
     // ===== Entry points =====
 
+    /// Parses the remaining source as a program and returns arena-owned statements.
+    /// Returns `ParseError` for invalid syntax, early errors, or allocation failure.
     pub fn parseProgram(self: *Parser) ParseError![]const *zstatements.Statement {
         self.last_error = null;
         return self.stmt_parser.parseProgram() catch |err| {
@@ -92,6 +100,8 @@ pub const Parser = struct {
         };
     }
 
+    /// Parses one statement at the current token, advancing the parser.
+    /// Returns `ParseError` for invalid syntax, early errors, or allocation failure.
     pub fn parseStatement(self: *Parser) ParseError!*zstatements.Statement {
         self.last_error = null;
         return self.stmt_parser.parseStatement() catch |err| {
@@ -100,6 +110,8 @@ pub const Parser = struct {
         };
     }
 
+    /// Parses one expression, including function, arrow, and class expressions.
+    /// Returns `ParseError` for invalid syntax, early errors, or allocation failure.
     pub fn parseExpression(self: *Parser) ParseError!*zparser.Node {
         self.last_error = null;
         return self.stmt_parser.expr_parser.parseExpression() catch |err| {

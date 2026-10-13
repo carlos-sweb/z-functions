@@ -7,18 +7,34 @@ pub fn build(b: *std.Build) void {
     const zlexer_dep = b.dependency("zlexer", .{ .target = target, .optimize = optimize });
     const zlexer_module = zlexer_dep.module("zlexer");
 
-    const zparser_dep = b.dependency("zparser", .{ .target = target, .optimize = optimize });
-    const zparser_module = zparser_dep.module("zparser");
-
     const zstatements_dep = b.dependency("zstatements", .{ .target = target, .optimize = optimize });
     const zstatements_module = zstatements_dep.module("zstatements");
+    // Reuse the bundled parser so all hooks share the same AST types.
+    const zparser_module = zstatements_module.import_table.get("zparser").?;
+    // Use the pinned Zig 0.17 lexer throughout the dependency graph.
+    zparser_module.addImport("zlexer", zlexer_module);
+    zstatements_module.addImport("zlexer", zlexer_module);
 
     const zfunctions_module = b.addModule("zfunctions", .{
         .root_source_file = b.path("src/zfunctions.zig"),
+        .target = target,
+        .optimize = optimize,
     });
     zfunctions_module.addImport("zlexer", zlexer_module);
     zfunctions_module.addImport("zparser", zparser_module);
     zfunctions_module.addImport("zstatements", zstatements_module);
+
+    const docs_object = b.addObject(.{
+        .name = "zfunctions",
+        .root_module = zfunctions_module,
+    });
+    const install_docs = b.addInstallDirectory(.{
+        .source_dir = docs_object.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+    });
+    const docs_step = b.step("docs", "Generate the official Zig API documentation");
+    docs_step.dependOn(&install_docs.step);
 
     const test_step = b.step("test", "Run all tests");
 
@@ -57,6 +73,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     src_tests.root_module.addImport("zparser", zparser_module);
+    src_tests.root_module.addImport("zlexer", zlexer_module);
     src_tests.root_module.addImport("zstatements", zstatements_module);
     const run_src_tests = b.addRunArtifact(src_tests);
     test_step.dependOn(&run_src_tests.step);

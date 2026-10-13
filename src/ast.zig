@@ -1,6 +1,7 @@
 const zparser = @import("zparser");
 const zstatements = @import("zstatements");
 
+/// A binding parameter and its optional default expression.
 pub const Param = struct {
     /// Identifier or destructuring pattern (`function f([a, b], {x}) ...`).
     pattern: *zstatements.BindingPattern,
@@ -13,11 +14,13 @@ pub const Param = struct {
 /// `.identifier` variant). Rest never has a default.
 pub const RestParam = *zstatements.BindingPattern;
 
+/// Regular parameters in source order and an optional trailing rest binding.
 pub const Params = struct {
     items: []const Param,
     rest: ?RestParam,
 };
 
+/// A block body or an arrow function's implicitly returned expression.
 pub const FunctionBody = union(enum) {
     block: *zstatements.Statement, // always a `.block`-kind Statement
     /// Arrow "concise body": a single AssignmentExpression, implicitly
@@ -25,6 +28,7 @@ pub const FunctionBody = union(enum) {
     expression: *zparser.Node,
 };
 
+/// Function syntax category and any declared name.
 pub const FunctionKind = union(enum) {
     function_decl: struct { name: []const u8 }, // always required
     function_expr: struct { name: ?[]const u8 }, // anonymous is legal
@@ -35,6 +39,7 @@ pub const FunctionKind = union(enum) {
     method: struct { name: []const u8 },
 };
 
+/// Arena-owned function syntax; `start` and `end` are byte offsets in the source.
 pub const FunctionNode = struct {
     start: usize,
     end: usize,
@@ -56,6 +61,7 @@ pub fn asFunctionNode(ptr: *anyopaque) *FunctionNode {
     return @ptrCast(@alignCast(ptr));
 }
 
+/// The syntactic category of a class member.
 pub const ClassElementKind = enum { method, get, set, field, static_block };
 
 /// A class element's property key. Numeric keys are pre-formatted to their
@@ -72,6 +78,7 @@ pub const ClassKey = union(enum) {
     computed: *zparser.Node,
 };
 
+/// A class member with a key and either a function body or field initializer.
 pub const ClassElement = struct {
     kind: ClassElementKind,
     /// For `.static_block` this is `.{ .ident = "" }` (blocks are keyless).
@@ -86,6 +93,7 @@ pub const ClassElement = struct {
     value: ?*zparser.Node = null,
 };
 
+/// Arena-owned class syntax; `start` and `end` are byte offsets in the source.
 pub const ClassNode = struct {
     start: usize,
     end: usize,
@@ -104,6 +112,7 @@ pub fn asClassNode(ptr: *anyopaque) *ClassNode {
     return @ptrCast(@alignCast(ptr));
 }
 
+/// Returns the exclusive source end offset of a block or expression body.
 pub fn functionBodyEnd(body: FunctionBody) usize {
     return switch (body) {
         .block => |b| b.end,
