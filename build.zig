@@ -4,16 +4,11 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const zlexer_dep = b.dependency("zlexer", .{ .target = target, .optimize = optimize });
-    const zlexer_module = zlexer_dep.module("zlexer");
-
     const zstatements_dep = b.dependency("zstatements", .{ .target = target, .optimize = optimize });
     const zstatements_module = zstatements_dep.module("zstatements");
-    // Reuse the bundled parser so all hooks share the same AST types.
+    // Reuse the released parser so all hooks share the same AST types.
     const zparser_module = zstatements_module.import_table.get("zparser").?;
-    // Use the pinned Zig 0.17 lexer throughout the dependency graph.
-    zparser_module.addImport("zlexer", zlexer_module);
-    zstatements_module.addImport("zlexer", zlexer_module);
+    const zlexer_module = zparser_module.import_table.get("zlexer").?;
 
     const zfunctions_module = b.addModule("zfunctions", .{
         .root_source_file = b.path("src/zfunctions.zig"),

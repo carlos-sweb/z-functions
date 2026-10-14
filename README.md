@@ -50,8 +50,8 @@ const program = try parser.parseProgram();
 
 Requires Zig 0.17.0 or newer; `mise.toml` pins 0.17.0. Dependencies are fetched
 automatically from immutable GitHub revisions; sibling checkouts are unnecessary.
-The build reuses z-statements' bundled z-parser (`35cb8ad5dd6f208b7a0bb9abb8ec7b17d39742aa`)
-and connects both modules to the pinned z-lexer so AST and token types stay shared.
+The build uses z-statements v0.2.0 and reuses its released z-parser v0.1.0
+and lexer modules so AST and token types stay shared without vendored copies.
 See the [official Zig 0.17 release notes](https://ziglang.org/download/0.17.0/release-notes.html).
 
 ```bash
