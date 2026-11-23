@@ -161,8 +161,36 @@ pub const Parser = struct {
 
     // ===== Class grammar (ECMA-262 section 15.7, narrowed) =====
 
+    fn formatBigIntKey(arena: Allocator, raw: []const u8) ParseError![]const u8 {
+        var s = raw;
+        if (s.len > 0 and (s[s.len - 1] == 'n' or s[s.len - 1] == 'N')) {
+            s = s[0 .. s.len - 1];
+        }
+        var radix: u8 = 10;
+        if (s.len >= 2 and s[0] == '0') {
+            if (s[1] == 'x' or s[1] == 'X') {
+                radix = 16;
+                s = s[2..];
+            } else if (s[1] == 'b' or s[1] == 'B') {
+                radix = 2;
+                s = s[2..];
+            } else if (s[1] == 'o' or s[1] == 'O') {
+                radix = 8;
+                s = s[2..];
+            }
+        }
+        var clean: std.ArrayList(u8) = .empty;
+        for (s) |ch| {
+            if (ch != '_') clean.append(arena, ch) catch return ParseError.OutOfMemory;
+        }
+        if (clean.items.len == 0) return ParseError.UnexpectedToken;
+        var bi = std.math.big.int.Managed.init(arena) catch return ParseError.OutOfMemory;
+        bi.setString(radix, clean.items) catch return ParseError.UnexpectedToken;
+        return bi.toString(arena, 10, .lower) catch return ParseError.OutOfMemory;
+    }
+
     /// One class-element key: identifier, keyword (`delete() {}` is a legal
-    /// method name), string literal, numeric literal (pre-formatted to its
+    /// method name), string literal, numeric/BigInt literal (pre-formatted to its
     /// string form), `#private` name, or a `[computed]` expression.
     fn parseClassElementKey(self: *Parser, parser: *zparser.Parser) ParseError!ast.ClassKey {
         const tok = parser.current;
@@ -185,11 +213,19 @@ pub const Parser = struct {
                 return .{ .ident = v };
             },
             .numeric_literal => {
-                // `class A { 1() {} }` -- the key is the number's string
-                // form. std.fmt's shortest form matches Number::toString for
-                // the common cases (integers, simple decimals) -- narrowed.
                 const n = tok.numeric_value orelse return ParseError.UnexpectedToken;
-                const text = std.fmt.allocPrint(self.arena, "{d}", .{n}) catch return ParseError.OutOfMemory;
+                const text: []const u8 = if (n == 0)
+                    "0"
+                else if (std.math.isFinite(n) and @trunc(n) == n and n >= -9007199254740992.0 and n <= 9007199254740992.0)
+                    std.fmt.allocPrint(self.arena, "{d}", .{@as(i64, @intFromFloat(n))}) catch return ParseError.OutOfMemory
+                else
+                    std.fmt.allocPrint(self.arena, "{d}", .{n}) catch return ParseError.OutOfMemory;
+                try parser.advance();
+                return .{ .ident = text };
+            },
+            .bigint_literal => {
+                const raw = tok.owned_value orelse tok.lexeme;
+                const text = try formatBigIntKey(self.arena, raw);
                 try parser.advance();
                 return .{ .ident = text };
             },
@@ -306,6 +342,11 @@ pub const Parser = struct {
             // method-FunctionNode so evaluation reuses the method machinery.
             if (is_static and parser.current.type == .punct_lbrace) {
                 const blk_start = parser.current.start;
+                const saved_flags = setBodyFlags(parser, false, false);
+                defer {
+                    parser.yield_allowed = saved_flags.y;
+                    parser.await_allowed = saved_flags.a;
+                }
                 const body_stmt = try self.stmt_parser.parseBlockStatement();
                 const fnode = try self.arena.create(ast.FunctionNode);
                 fnode.* = .{
@@ -372,6 +413,11 @@ pub const Parser = struct {
                 var value: ?*zparser.Node = null;
                 if (parser.current.type == .punct_assign) {
                     try parser.advance();
+                    const saved_flags = setBodyFlags(parser, false, false);
+                    defer {
+                        parser.yield_allowed = saved_flags.y;
+                        parser.await_allowed = saved_flags.a;
+                    }
                     value = try parser.parseAssignmentExpression();
                 }
                 // Field declarations end with ';' or ASI; consuming an

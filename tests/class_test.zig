@@ -184,3 +184,30 @@ test "field early errors: constructor-named fields and #constructor" {
     try helpers.expectParseError("class C { #constructor() {} }", zfunctions.ParseError.UnexpectedToken);
     try helpers.expectParseError("class C { get x = 1; }", zfunctions.ParseError.UnexpectedToken);
 }
+
+test "async context in class computed property names and BigInt class member keys" {
+    try helpers.parseAndCheck(
+        \\async function f() {
+        \\  class C {
+        \\    static { var x = 1; }
+        \\    x = 1;
+        \\    [await 1]() {}
+        \\    1n() {}
+        \\    0x10n = 2;
+        \\    999999999999999999n = 3;
+        \\  }
+        \\}
+    , {}, struct {
+        fn check(_: void, stmt: *zstatements.Statement) !void {
+            const fnode = zfunctions.asFunctionNode(stmt.data.function_declaration);
+            const cls_stmt = fnode.body.block.data.block[0];
+            const cnode = zfunctions.asClassNode(cls_stmt.data.class_declaration);
+            try testing.expectEqual(@as(usize, 6), cnode.elements.len);
+            try testing.expect(cnode.elements[2].key == .computed);
+            try testing.expect(cnode.elements[2].key.computed.data == .await_expr);
+            try testing.expectEqualStrings("1", cnode.elements[3].key.ident);
+            try testing.expectEqualStrings("16", cnode.elements[4].key.ident);
+            try testing.expectEqualStrings("999999999999999999", cnode.elements[5].key.ident);
+        }
+    }.check);
+}
