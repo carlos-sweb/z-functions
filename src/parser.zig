@@ -262,10 +262,8 @@ pub const Parser = struct {
         // Params never allow yield/await; the body does per the method's
         // generator/async-ness.
         const saved_flags = setBodyFlags(parser, false, false);
-        defer {
-            parser.yield_allowed = saved_flags.y;
-            parser.await_allowed = saved_flags.a;
-        }
+        parser.new_target_allowed = true;
+        defer restoreBodyFlags(parser, saved_flags);
         const params = try self.parseParams(parser);
         switch (kind) {
             .get => if (params.items.len != 0 or params.rest != null) return ParseError.GetterCannotHaveParameters,
@@ -343,10 +341,8 @@ pub const Parser = struct {
             if (is_static and parser.current.type == .punct_lbrace) {
                 const blk_start = parser.current.start;
                 const saved_flags = setBodyFlags(parser, false, false);
-                defer {
-                    parser.yield_allowed = saved_flags.y;
-                    parser.await_allowed = saved_flags.a;
-                }
+                parser.new_target_allowed = true;
+                defer restoreBodyFlags(parser, saved_flags);
                 const body_stmt = try self.stmt_parser.parseBlockStatement();
                 const fnode = try self.arena.create(ast.FunctionNode);
                 fnode.* = .{
@@ -414,10 +410,8 @@ pub const Parser = struct {
                 if (parser.current.type == .punct_assign) {
                     try parser.advance();
                     const saved_flags = setBodyFlags(parser, false, false);
-                    defer {
-                        parser.yield_allowed = saved_flags.y;
-                        parser.await_allowed = saved_flags.a;
-                    }
+                    parser.new_target_allowed = true;
+                    defer restoreBodyFlags(parser, saved_flags);
                     value = try parser.parseAssignmentExpression();
                 }
                 // Field declarations end with ';' or ASI; consuming an
@@ -477,12 +471,9 @@ fn arrowFunctionHook(ctx: *anyopaque, parser: *zparser.Parser) zparser.ParseErro
         };
     }
     // Params never allow yield/await; an async arrow's body allows await
-    // (arrows are never generators).
+    // (arrows are never generators and inherit enclosing new.target).
     const saved_flags = setBodyFlags(parser, false, false);
-    defer {
-        parser.yield_allowed = saved_flags.y;
-        parser.await_allowed = saved_flags.a;
-    }
+    defer restoreBodyFlags(parser, saved_flags);
     var params: ast.Params = undefined;
     if (parser.current.type == .punct_lparen) {
         params = self.parseParams(parser) catch |err| {
@@ -529,16 +520,22 @@ fn parseFunctionFlags(parser: *zparser.Parser) zparser.ParseError!struct { is_as
     return .{ .is_async = is_async, .is_generator = is_generator };
 }
 
-const SavedFlags = struct { y: bool, a: bool };
+const SavedFlags = struct { y: bool, a: bool, nt: bool };
 
 /// yield/await are grammatical strictly per-body: parameters never allow
 /// them, and a nested non-generator/non-async body turns them back off.
 /// Returns the previous flags for the caller's defer-restore.
 fn setBodyFlags(parser: *zparser.Parser, is_generator: bool, is_async: bool) SavedFlags {
-    const saved: SavedFlags = .{ .y = parser.yield_allowed, .a = parser.await_allowed };
+    const saved: SavedFlags = .{ .y = parser.yield_allowed, .a = parser.await_allowed, .nt = parser.new_target_allowed };
     parser.yield_allowed = is_generator;
     parser.await_allowed = is_async;
     return saved;
+}
+
+fn restoreBodyFlags(parser: *zparser.Parser, saved: SavedFlags) void {
+    parser.yield_allowed = saved.y;
+    parser.await_allowed = saved.a;
+    parser.new_target_allowed = saved.nt;
 }
 
 fn functionExpressionHook(ctx: *anyopaque, parser: *zparser.Parser) zparser.ParseError!zparser.FunctionHookResult {
@@ -554,18 +551,14 @@ fn functionExpressionHook(ctx: *anyopaque, parser: *zparser.Parser) zparser.Pars
         name = binding.name;
     }
     const saved_params = setBodyFlags(parser, false, false);
+    parser.new_target_allowed = true;
+    defer restoreBodyFlags(parser, saved_params);
     const params = self.parseParams(parser) catch |err| {
-        parser.yield_allowed = saved_params.y;
-        parser.await_allowed = saved_params.a;
         self.last_error = err;
         return zparser.ParseError.UnexpectedToken;
     };
     parser.yield_allowed = flags.is_generator;
     parser.await_allowed = flags.is_async;
-    defer {
-        parser.yield_allowed = saved_params.y;
-        parser.await_allowed = saved_params.a;
-    }
     const body_stmt = self.stmt_parser.parseBlockStatement() catch |err| {
         self.last_error = err;
         return zparser.ParseError.UnexpectedToken;
@@ -589,10 +582,8 @@ fn methodHook(ctx: *anyopaque, parser: *zparser.Parser, kind: zparser.MethodKind
     // Params never allow yield/await; the body does, per the method's
     // own generator/async-ness.
     const saved_flags = setBodyFlags(parser, false, false);
-    defer {
-        parser.yield_allowed = saved_flags.y;
-        parser.await_allowed = saved_flags.a;
-    }
+    parser.new_target_allowed = true;
+    defer restoreBodyFlags(parser, saved_flags);
     const params = self.parseParams(parser) catch |err| {
         self.last_error = err;
         return zparser.ParseError.UnexpectedToken;
@@ -660,10 +651,8 @@ fn functionDeclarationHook(ctx: *anyopaque, parser: *zparser.Parser) zstatements
     }
     const binding = try self.stmt_parser.parseBindingName(); // zstatements-typed already, try normal
     const saved = setBodyFlags(parser, false, false);
-    defer {
-        parser.yield_allowed = saved.y;
-        parser.await_allowed = saved.a;
-    }
+    parser.new_target_allowed = true;
+    defer restoreBodyFlags(parser, saved);
     const params = self.parseParams(parser) catch |err| {
         self.last_error = err;
         return zstatements.ParseError.UnexpectedToken;
