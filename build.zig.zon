@@ -1,6 +1,6 @@
 .{
     .name = .zfunctions,
-    .version = "0.2.1",
+    .version = "0.2.2",
     .minimum_zig_version = "0.17.0",
     .fingerprint = 0xa7444485afc81fbc,
     .description = "ECMAScript functions/arrow-functions parser (ECMA-262 section 15, narrowed) in Zig",
@@ -14,8 +14,8 @@
     },
     .dependencies = .{
         .zstatements = .{
-            .url = "https://github.com/carlos-sweb/z-statements/archive/refs/tags/v0.2.1.tar.gz",
-            .hash = "zstatements-0.2.1-E_kRv9XBAQBDrVA1mwZFp5azppPaLCX5pNEOyf7dh7Y_",
+            .url = "https://github.com/carlos-sweb/z-statements/archive/refs/tags/v0.2.2.tar.gz",
+            .hash = "zstatements-0.2.2-E_kRv2rLAQBSMk4mnT3OWpWi0rNXkbgwZ04ol2PqydSn",
         },
         .zregex = .{
             .url = "https://github.com/carlos-sweb/z-regex/archive/refs/tags/v0.9.1.tar.gz",
